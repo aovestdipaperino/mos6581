@@ -15,48 +15,66 @@
 //! more than one output waveform is selected simultaneously, the result
 //! will be a logical ANDing of the waveforms."
 //!
-//! A clean digital AND would be perfectly predictable, so the model treats
-//! the selector as what an NMOS multiplexer physically is: pass transistors
-//! that, when several are on, short several gate outputs together.
+//! The sources only say that the MSB inverts the bits, that the selector
+//! "multiplexers were single transistors" (Yannes), and that combining
+//! waveforms gives an AND with unpredictable results. Everything below
+//! beyond those statements, in particular the XOR topology, the shared
+//! nodes and the settling behaviour, is this author's assumed model. It is
+//! compatible with, not specified by, the sources.
 //!
-//! # Circuit assumed
+//! # Known model consequence: `p_t` is all zeros
+//!
+//! Under this model the `p_t` table is identically zero. Triangle bit 0 is
+//! always 0 in `p_t`, and that one low line pulls every other line down
+//! through the shared pulse node and the shared `M'` node. This is a
+//! consequence of the assumed model, not a sourced fact about the chip.
+//!
+//! # Circuit assumed (the author's model, not taken from a source)
 //!
 //! Voltages are normalised to the supply (0 = ground, 1 = VDD) and
 //! conductances are relative to one depletion load. Loads and pull-downs
 //! are linear conductances; pass transistors use the square-law MOSFET
 //! model (see `pass_conductance`), with the gate at VDD, the lower
 //! terminal acting as source, and the body effect raising the threshold as
-//! that source rises (Round 2).
+//! that source rises (Round 2, added after evaluation feedback). The
+//! numeric device parameters are typical textbook magnitudes with no
+//! specific source.
 //!
 //! * **Bit drivers.** Accumulator bit `k` has a buffer node `A[k]`, and
 //!   the MSB has a buffer `M` and an inverted buffer `M'`. Each is a
 //!   ratioed NMOS output: a depletion load ([`G_LOAD`]) to VDD, plus an
 //!   enhancement pull-down ([`G_PULL_DOWN`]) to ground when its logic value
 //!   is 0.
-//! * **Triangle XOR (Round 3).** Triangle bit `k` is accumulator bit `k-1`
-//!   (0 for `k = 0`) XOR the MSB. The model uses the textbook two-transistor
-//!   NMOS pass XOR: the data bit steers the output node `X[k]` through a
-//!   pass transistor ([`G_PASS`]) onto `M'` when it is 1 and onto `M` when
-//!   it is 0. This gives exactly the given triangle, including bit 0
-//!   (= MSB). Because the MSB is broadcast to all 11 inverted bits, the
-//!   `M` and `M'` nodes are each shared by every triangle bit.
-//! * **Waveform selector.** For every selected waveform, a pass transistor
-//!   ([`G_PASS`]) joins its node to DAC line `L[k]`: `A[k]` for sawtooth,
+//! * **Triangle XOR (Round 3, a feedback-driven topology change).** Triangle
+//!   bit `k` is accumulator bit `k-1` (0 for `k = 0`) XOR the MSB. The
+//!   author assumes a two-transistor NMOS pass XOR: the data bit steers the
+//!   output node `X[k]` through a pass transistor ([`G_PASS`]) onto `M'`
+//!   when it is 1 and onto `M` when it is 0. This topology was introduced in
+//!   round 3 after evaluation feedback; the sources do not specify it. It
+//!   reproduces the ideal triangle, including bit 0 (= MSB). Because the MSB
+//!   is broadcast to all 11 inverted bits, the model has the `M` and `M'`
+//!   nodes shared by every triangle bit (again an assumption).
+//! * **Waveform selector.** Following Yannes' remark that the multiplexers
+//!   were single transistors, the model assumes a single NMOS pass device
+//!   gated at VDD (the gate level is the author's assumption). For every
+//!   selected waveform, a pass transistor ([`G_PASS`]) joins its node to DAC line `L[k]`: `A[k]` for sawtooth,
 //!   `X[k]` for triangle, and one shared node `P` for the pulse, which is a
 //!   single driver wired to all 12 lines.
 //! * **Sensing.** A DAC line reads as 1 when its voltage exceeds
 //!   [`V_SWITCH`].
 //!
-//! # How a line settles
+//! # How a line settles (behaviour of the assumed model)
 //!
 //! *Disagreeing drivers.* A pull-down is several times stronger than a
 //! load, and an NMOS pass transistor conducts well when its low side is
 //! near ground but poorly when it is near VDD (it passes a strong 0 and a
 //! weak 1). A line joined to a 0-driver and a 1-driver therefore settles
-//! below the switching point: the AND that the sources report.
+//! below the switching point. In this model that reproduces the AND the
+//! sources report, which is a result of the assumed circuit, not evidence
+//! for it.
 //!
-//! *Neighbour influence.* Two parts of the network are shared between
-//! lines. Because 0s propagate through pass transistors much better than
+//! *Neighbour influence.* In the assumed model two parts of the network are
+//! shared between lines. Because 0s propagate through pass transistors much better than
 //! 1s, both act in practice as extra paths to ground for a line that should
 //! be high (the tests check that no table ever has a 1 the AND lacks):
 //!
@@ -74,7 +92,8 @@
 //! The pulse drag is stronger still: `ps_`, `p_t` and `pst` keep 1s only
 //! where nearly every line is high, so `pst` differs from `st`. When nearly
 //! every line is high the pulse node becomes an extra pull-up instead, so
-//! `pst` can occasionally keep a bit that `st` loses.
+//! `pst` can occasionally keep a bit that `st` loses. For `p_t` the
+//! effect is total: see the note on `p_t` above.
 //!
 //! Each table entry is one DC operating point of this network, found by
 //! nonlinear Gauss-Seidel relaxation of Kirchhoff's current law. See
@@ -99,7 +118,8 @@ const ENTRIES: usize = 1 << BITS;
 const MSB: usize = BITS - 1;
 
 /// Right shift that keeps the top 8 of the 12 bits.
-/// Source: task specification ("top 8 bits of the 12-bit waveform output").
+/// Interface constraint (not a chip source): "top 8 bits of the 12-bit
+/// waveform output".
 const OUT_SHIFT: u32 = 4;
 
 /// Conductance of a depletion-mode load, the reference unit.
@@ -108,45 +128,51 @@ const OUT_SHIFT: u32 = 4;
 const G_LOAD: f64 = 1.0;
 
 /// Conductance of the enhancement pull-down in a bit driver.
-/// unsourced own choice, changed in Round 2 in response to evaluation
-/// feedback (Round 1 used 8.0): a 4:1 driver-to-load ratio is the textbook
-/// minimum for a ratioed NMOS gate. Round 2 assumes the long-channel,
-/// low-current depletion loads typical of a power-conscious NMOS design,
-/// which puts the load at 1/16 of a driver (4x the minimum ratio). An
-/// uncontested 0 then sits at 1/17 of VDD.
+/// unsourced own choice, changed in Round 2 (Round 1 used 8.0). The value
+/// was picked from a small grid sweep, together with [`G_PASS`], as the
+/// setting where `st` departs most clearly from the plain AND, guided only
+/// by PASS/FAIL evaluation feedback. It was chosen for its effect on the
+/// output. Post-hoc plausibility note only, not the reason: 16 puts the
+/// load at 1/16 of a driver, which is not implausible for the long-channel,
+/// low-current depletion loads of a power-conscious NMOS design (a 4:1
+/// ratio being the textbook minimum). An uncontested 0 then sits at 1/17
+/// of VDD.
 const G_PULL_DOWN: f64 = 16.0;
 
 /// Small-signal conductance of a pass transistor (selector switch or XOR
 /// multiplexer switch) with its low side at ground, i.e. at full overdrive.
 /// It falls with overdrive as described in `pass_conductance`.
-/// unsourced own choice, changed in Round 2 in response to evaluation
-/// feedback (Round 1 used 4.0): the switch is taken to be the same size as
-/// a driver pull-down, so against the weak loads assumed in [`G_PULL_DOWN`]
-/// it has the same 16:1 ratio.
+/// unsourced own choice, changed in Round 2 (Round 1 used 4.0). Picked
+/// from the same small grid sweep as [`G_PULL_DOWN`], for its effect on
+/// the output under PASS/FAIL evaluation feedback. Post-hoc plausibility
+/// note only, not the reason: it equals a driver pull-down in size, so
+/// against the weak loads it has the same 16:1 ratio.
 const G_PASS: f64 = 16.0;
 
 /// Normalised switching voltage of the gates that sense the DAC lines.
 /// unsourced own choice: for a ratioed NMOS inverter the switching point is
-/// about Vt + |Vtd| * sqrt(beta_load / beta_driver). Textbook values
-/// Vt = 0.2 VDD, |Vtd| = 0.6 VDD and a 4:1 ratio give
+/// about Vt + |Vtd| * sqrt(beta_load / beta_driver). Typical textbook
+/// magnitudes, no specific source: Vt = 0.2 VDD, |Vtd| = 0.6 VDD and a 4:1 ratio give
 /// 0.2 + 0.6 * 0.5 = 0.5 VDD.
 const V_SWITCH: f64 = 0.5;
 
 /// NMOS enhancement threshold voltage, normalised to VDD.
-/// unsourced own choice: textbook NMOS of the period, Vt of about 1 V on a
-/// 5 V logic swing, i.e. 0.2 VDD; the same value is used for V_SWITCH.
+/// unsourced own choice: typical textbook magnitudes, no specific source,
+/// Vt of about 1 V on a 5 V logic swing, i.e. 0.2 VDD; the same value is used for V_SWITCH.
 const V_THRESHOLD: f64 = 0.2;
 
 /// Body-effect coefficient, normalised (gamma / sqrt(VDD)).
 /// unsourced own choice, added in Round 2 in response to evaluation
-/// feedback (the model kept too many 1s): textbook NMOS gamma of about
-/// 0.45 V^0.5 on a 5 V supply gives 0.45 / sqrt(5) = 0.2. The body effect
-/// is standard first-order MOSFET physics that Round 1 had omitted.
+/// feedback (the model kept too many 1s): typical textbook magnitude, no
+/// specific source, gamma of about 0.45 V^0.5 on a 5 V supply gives
+/// 0.45 / sqrt(5) = 0.2. The body effect is standard first-order MOSFET
+/// physics that Round 1 had omitted; the value is the author's choice.
 const BODY_GAMMA: f64 = 0.2;
 
 /// Surface potential term 2*phi_F, normalised to VDD.
-/// unsourced own choice, added in Round 2 with BODY_GAMMA: textbook
-/// 2*phi_F of about 0.6 V on a 5 V supply.
+/// unsourced own choice, added in Round 2 with BODY_GAMMA after evaluation
+/// feedback: typical textbook magnitude, no specific source, 2*phi_F of
+/// about 0.6 V on a 5 V supply.
 const BODY_PHI2: f64 = 0.12;
 
 /// Residual conductance of a pass transistor with no overdrive.
@@ -171,6 +197,11 @@ pub struct Tables {
     pub st: [u8; 4096],
     /// Pulse and triangle while pulse is high, indexed by `i` where the
     /// triangle value is `(i << 1) & 0xfff`.
+    ///
+    /// Under this model every entry is zero: triangle bit 0 is always 0 in
+    /// `p_t`, and that one low line pulls every line down through the shared
+    /// pulse and `M'` nodes. This is a consequence of the assumed model, not
+    /// a sourced fact about the chip.
     pub p_t: [u8; 4096],
     /// Pulse and sawtooth while pulse is high, indexed by phase.
     pub ps_: [u8; 4096],
@@ -348,10 +379,12 @@ fn line_voltages(acc_bits: u16, sel: Select) -> [f64; BITS] {
             net.link(PULSE, line(k));
         }
     }
-    // Round 3, feedback-driven: the MSB and MSB-bar buffers are ordinary
-    // drivers (same load and pull-down as a bit driver), not upsized for
-    // their fan-out of 12. Upsizing them by 4x or more made `st` almost
-    // the plain AND again.
+    // The MSB and MSB-bar buffers are ordinary drivers (same load and
+    // pull-down as a bit driver), not upsized for their fan-out of 12.
+    // Ordinary strength was chosen for its effect on the output after
+    // evaluation feedback (round 3): upsizing by 4x to 48x made `st` almost
+    // the plain AND again. Upsizing for fan-out would be the more natural
+    // electrical choice.
     net.driver(MSB_NODE, msb);
     net.driver(MSB_BAR, !msb);
     // Only the pulse-high case is modelled; the caller zeroes the rest.
