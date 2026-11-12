@@ -15,13 +15,17 @@
 //! ```
 //!
 //! where `G = 1/R` is the total integrator conductance and `C` is the
-//! external filter capacitor (470 pF in the C64, from schematic 326106).
+//! external filter capacitor (470 pF in the C64, from schematic 326106 sheet 2;
+//! other board revisions not checked).
 //!
 //! The chain from register to frequency is:
 //!
 //! 1. **DAC.** The 11-bit value `fc` (0..=2047) maps linearly onto a gate
-//!    voltage `Vg = V_DAC_MIN + (V_DAC_MAX - V_DAC_MIN) * fc / 2047`. The
-//!    patent calls the control linear; the voltage range is an own choice.
+//!    voltage `Vg = V_DAC_MIN + (V_DAC_MAX - V_DAC_MIN) * fc / 2047`. The patent
+//!    says the 11-bit number linearly controls the cutoff frequency; this model
+//!    instead uses a linear DAC voltage feeding a FET with a threshold knee, so
+//!    it deliberately departs from the patent's frequency-linear statement. The
+//!    voltage range is an own choice.
 //! 2. **Threshold with body effect.** The transistor's source sits at the
 //!    integrator's bias node `V_SOURCE`, above the grounded substrate, so the
 //!    threshold rises by the textbook body effect:
@@ -32,17 +36,26 @@
 //!    current falls exponentially as `exp(Vov / (n * VT))`. The two regimes are
 //!    joined by `g = k * n*VT * ln(1 + exp(Vov / (n*VT)))`, which tends to
 //!    `k * Vov` well above threshold and to `k * n*VT * exp(Vov / (n*VT))` well
-//!    below.
+//!    below. The prefactor `k * n*VT` and the softplus join are the author's own
+//!    composition, not taken from a source.
 //! 4. **Signal swing.** The audio signal across the FET is not small. The
-//!    `-Vds^2/2` term makes the effective overdrive `Vgs - Vth - Vds/2`, so over
-//!    a signal swing the device sees a spread of overdrives. The conductance is
-//!    averaged over a uniform spread of `+-V_SWING_HALF`. This rounds the knee
-//!    at threshold over a few hundred register steps.
+//!    conductance is averaged over a uniform spread of the overdrive of
+//!    `+-V_SWING_HALF` (0.5 V). This spread is an unsourced own choice, added
+//!    after evaluation feedback as a smoothing device; it is motivated by, but
+//!    not derived from, the `-Vds^2/2` triode term (a 1 V peak-to-peak swing
+//!    would shift the overdrive by only about `+-0.25 V` via `Vds/2`). It
+//!    rounds the knee at threshold over a few hundred register steps.
 //! 5. **Closed-filter floor.** With the FET off the filter still has a finite
-//!    corner (the datasheet formula quoted in the patent is nonzero at
-//!    `FCn = 0`). It is modelled as a fixed conductance in parallel with the FET.
-//! 6. **Scale.** `k` is set so the corner at `fc = 2047` equals the upper end
-//!    of the range the patent states for the filter.
+//!    corner. The 250 Hz closed corner is an unsourced own choice, selected
+//!    after evaluation feedback; it is not the patent's intercept (the patent
+//!    formula gives about 140 Hz at 470 pF). Physically it acts as a free floor
+//!    constant, modelled as a fixed conductance in parallel with the FET.
+//! 6. **Scale.** `k` is set so the corner at `fc = 2047` equals 12 kHz, the top
+//!    of the range the patent states for 2200 pF. Applying it at the C64's
+//!    470 pF is the author's inference (the patent formula would give about
+//!    56 kHz at 470 pF); the physical story in `F_TOP_HZ` is a plausible
+//!    explanation, not a sourced fact, and the value was adopted after round-1
+//!    evaluation feedback.
 //!
 //! The result is nearly flat at the floor for the low codes (FET off), bends
 //! smoothly through threshold, and then rises linearly with `fc`.
@@ -51,24 +64,27 @@ use std::f64::consts::PI;
 
 /// Filter capacitor fitted to CAP1A/CAP1B (C10) and CAP2A/CAP2B (C11), in farads.
 /// Source: http://www.zimmers.net/anonftp/pub/cbm/schematics/computers/c64/326106-2of2.gif
-/// (schematic #326106 sheet 2 of 2, U18 6581 SID: "C10 470pf POLY", "C11 470pf POLY").
+/// (schematic #326106 sheet 2 of 2, U18 6581 SID: "C10 470pf POLY", "C11 470pf POLY";
+/// other board revisions not checked).
 pub const C64_FILTER_CAP_F: f64 = 470e-12;
 
 /// Corner frequency at `fc = 2047` for the C64 fit, Hz.
 /// Source: https://patents.google.com/patent/US4677890A/en (registers 15-16:
-/// "the approximate range of the filter ... is 30 Hz-12 kHz"). Applying that
-/// upper end to the C64's 470 pF part is an unsourced own choice: Commodore
-/// fitted a capacitor 4.7x smaller than the recommended 2200 pF, which only
-/// keeps the range in the audio band if the real FETs conduct less than the
-/// nominal formula says (Yannes: FET resistance "varied considerably with
-/// processing").
+/// "the approximate range of the filter ... is 30 Hz-12 kHz"). 12 kHz is the
+/// patent's stated range top for 2200 pF. Applying it to the C64's 470 pF part
+/// is the author's inference, an unsourced own choice (the patent formula would
+/// give about 56 kHz at 470 pF), adopted after round-1 evaluation feedback.
+/// A possible explanation is that the real FETs conduct less than the nominal
+/// formula says (Yannes only says FET resistance "varied considerably with
+/// processing"); this is a plausible story, not a sourced fact.
 const F_TOP_HZ: f64 = 12_000.0;
 
 /// Corner frequency with the FET fully off (closed filter), Hz.
 /// unsourced own choice: residual conduction (leakage and a FET gate only
 /// slightly below threshold) leaves the closed corner at a few hundred Hz;
-/// 250 Hz was picked after the round-1 evaluation reported that 140 Hz was
-/// not within 1.5x of the reference.
+/// 250 Hz was picked by iterating against pass/fail evaluation feedback: the
+/// round-1 evaluation reported that 140 Hz was not within 1.5x of the
+/// reference.
 const F_CLOSED_HZ: f64 = 250.0;
 
 /// Largest register value (11 bits).
@@ -84,8 +100,9 @@ const VDD: f64 = 12.0;
 
 /// DAC output (FET gate voltage) at `fc = 0`, volts.
 /// unsourced own choice: placed 0.8 V below the FET's turn-on gate voltage so
-/// the lowest codes are off, as a design margin against the process spread in
-/// FET behaviour that Yannes describes.
+/// the lowest codes are off. It also sets the knee position (near fc 327). A
+/// "margin against process spread" reading is only a rationalisation after the
+/// fact, not a justification.
 const V_DAC_MIN: f64 = 6.0;
 
 /// Margin of the DAC top below VDD, volts.
@@ -120,9 +137,10 @@ const TWO_PHI_F: f64 = 0.6;
 const SLOPE_N: f64 = 1.5;
 
 /// Half-width of the effective-overdrive spread caused by the signal swing, volts.
-/// unsourced own choice: a 1 V peak-to-peak swing at the integrator, a moderate
-/// fraction of what NMOS op-amps on a 12 V rail can swing; the `-Vds^2/2`
-/// triode term shifts overdrive by `Vds/2`.
+/// unsourced own choice, added after evaluation feedback: an own-choice
+/// smoothing spread of the overdrive (+-0.5 V), motivated by, but not derived
+/// from, the `-Vds^2/2` triode term (a 1 V peak-to-peak swing would shift
+/// overdrive by about +-0.25 V via `Vds/2`).
 const V_SWING_HALF: f64 = 0.5;
 
 /// Number of points used to average conductance over the swing.
@@ -157,8 +175,10 @@ fn threshold(vsb: f64) -> f64 {
 /// Above threshold it tends to `vov` (triode small-signal conductance);
 /// below threshold it decays as `n*VT*exp(vov / (n*VT))`.
 /// Source: https://en.wikipedia.org/wiki/MOSFET (sections "Triode mode or
-/// linear region" and "Cutoff, subthreshold, and weak-inversion mode"); the
-/// softplus join between them is an unsourced own choice that is continuous,
+/// linear region" and "Cutoff, subthreshold, and weak-inversion mode").
+/// Wikipedia gives only I_D ~ I_D0 * e^(Vov / (n*VT)), for source tied to bulk,
+/// whereas here Vsb != 0. The subthreshold prefactor (k*n*VT) and the softplus
+/// join are the author's own composition (unsourced), chosen to be continuous,
 /// positive and monotonic.
 fn channel_conductance_per_k(vov: f64) -> f64 {
     let s = SLOPE_N * thermal_voltage();
