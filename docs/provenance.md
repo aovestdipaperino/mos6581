@@ -97,36 +97,71 @@ they come from `sid-gpl-data`.
 | `NOISE_CLOCK_BIT` | `19` | unsourced own choice, constrained by the Yannes interview ("an intermediate bit") and the datasheet noise range; slowest bit giving a shift rate of at least 40 kHz at the top setting |
 | `NOISE_SHIFT_RELOAD` | `0x7F_FFFF` | unsourced own choice; all ones is a valid, maximally distant-from-lockup seed |
 
-Other defaults used without the `gpl-data` feature:
+Other defaults used without the `gpl-data` feature. The three below were written
+in the clean-room round of 2026-11-12, described next.
 
-- Combined waveform tables: the bitwise AND of the pure waveforms
-  (`src/tables/default.rs`), our own derivation; the measured tables
-  are used only with `gpl-data`.
-- Filter cutoff: linear from 30 Hz to 12 kHz over the 11-bit register, the MOS 6581
-  datasheet's nominal filter range ("approximately 30 Hz - 12 kHz"); the measured
-  curves are used only with `gpl-data`.
-- Power-on RAM pattern in `sid-play`: all zeros without `gpl-data`; libsidplayfp's
-  captured pattern only with it.
+- Filter cutoff: `src/tables/clean_cutoff.rs`, a physical model of the 6581's
+  voltage-controlled-resistor integrators (f = G / 2πC).
+- Combined waveform tables: `src/tables/clean_waves.rs`, an electrical model of the
+  waveform selector's NMOS pass transistors shorting gate outputs together.
+- Power-on RAM pattern in `sid-play`: `crates/sid-play/src/poweron_clean.rs`, the
+  documented KERNAL and BASIC state at the READY prompt.
+
+The previous built-ins (the bitwise AND tables `WAVE_AND`, the linear 30 Hz to
+12 kHz datasheet curve `CUTOFF_POINTS`, and an all-zero power-on image) remain in
+the source as reference baselines.
+
+## Clean-room round of 2026-11-12: cutoff, combined waveforms, power-on
+
+Method:
+- Each model was written by an isolated author agent from public sources only:
+  - the MOS patent US 4,677,890
+  - the Yannes interview
+  - oxyron's register notes
+  - the C64 schematics on zimmers.net
+  - Wikipedia's MOSFET article (cutoff only)
+  - the pagetable.com C64 memory map and the Programmer's Reference Guide and "Mapping the Commodore 64" (power-on only)
+- The authors were forbidden all emulator sources and documentation, `sid-gpl-data`, this file's Evidence column, the gap tests and git history.
+- An evaluator, run outside the published repositories, compared each model with the measured data. The evaluator returned only PASS or FAIL per metric to the author, with at most three rounds per item. The pass thresholds were fixed before any authoring started.
+- If no round passed, the best round that beat the previous built-in on every metric shipped.
+- A separate reviewer, with public sources only, checked every `Source:` claim. Every model came back "clean with doc fixes", and the fixes were applied as comment-only commits.
+- No reviewer found material lifted from an emulator or from measured data.
+
+Feedback narrows choices. A PASS/FAIL signal over several rounds still lets an author narrow a free parameter, so every value an author chose after seeing evaluation results is labelled "feedback-driven" in the code. The numbers below are the evaluator's, recorded after each item closed. They were never shown to the authors.
+
+| Item | Rounds | Outcome | Measured gap (previous built-in in brackets) |
+|---|---|---|---|
+| Cutoff | 3 | Round 2 ships (fallback: the median-error threshold never passed) | closed corner within a factor of 1.136 of measured (7.33); median abs log2 error 0.689 octave (0.708); `scale` fixture RMS 1703 vs 1392 measured build (308 vs 1392) |
+| Combined waveforms | 3 | Round 3 ships (fallback: `p_t` missed the 40% threshold) | RMS of 255: `st` 49.9 (83.8), `p_t` 86.5 (139.2), `ps_` 28.2 (140.9), `pst` 6.3 (84.4); `pst` now differs from `st` |
+| Power-on image | 1 | Passed every threshold | 973 of 1024 bytes match the captured pattern (859 for all zeros); all 17 corpus tunes within 0.05 tonality of the same build loaded with the captured image (16 of 17 for zeros) |
+
+Feedback-driven values:
+- Cutoff:
+  - the 250 Hz closed corner
+  - using the patent's 12 kHz range top (stated for 2200 pF) at the C64's 470 pF
+  - the ±0.5 V overdrive smoothing
+- Combined waveforms:
+  - the pull-down and pass-transistor strengths
+  - the body-effect terms
+  - the triangle pass-XOR topology
+  - the ordinary-strength MSB drivers
+- Power-on image: none. Where the sources conflict, the author's choices are labelled as such in the file.
+
+Round 3 of the cutoff, which narrowed the top end by bisecting on the feedback, was not shipped for that reason.
 
 ## Known default-build fidelity gaps
 
 The default build (without `gpl-data`) is clean-room and measurably less faithful
 than the build with the measured data. The known differences:
 
-- Cutoff closed corner: the default curve closes at 30 Hz (datasheet nominal, 2200
-  pF) while the measured curve closes at about 200 Hz. Tunes and fixtures that play
-  through a mostly closed low-pass come out much quieter in the default build. The
-  scale fixture renders at rms 53 in the default build and 1362 with `gpl-data`;
-  the irq fixture tail renders at rms 27 and 1067 respectively
-  (sid-play's `tests/fixture_render.rs`).
-- Combined waveforms: the default tables are the bitwise AND of the pure waveforms,
-  which differs from the measured tables. From
-  `cargo test -p mos6581 --features gpl-data --test gap -- --nocapture`:
-  `GAP st: rms 83.8 max 170 (of 255)`, `GAP p_t: rms 139.2 max 255 (of 255)`,
-  `GAP ps_: rms 140.9 max 254 (of 255)`, `GAP pst: rms 84.4 max 170 (of 255)`.
-- The default `pst` table equals `st` by construction, so the mutual-distinctness
-  test cannot catch a pst to st fall-through in the default build. The `gpl-data`
-  build covers it.
+- Cutoff curve: the clean-room curve's closed corner is close to the measured
+  one, but its mid-range shape is not: the median error is 0.689 octave, set by the
+  knee position, which rests on unsourced DAC-voltage choices. Fixtures through a
+  mostly closed low-pass now play at about the measured build's level (the `scale`
+  fixture renders at rms 1703 against 1392; before this round it was 308).
+- Combined waveforms: the clean-room tables are much closer to measured than the
+  AND tables were (RMS of 255: `st` 49.9, `p_t` 86.5, `ps_` 28.2, `pst` 6.3). `p_t`
+  is all zeros under the model, which is quieter than the real chip.
 - Voice model: the default voice is a centred DAC, which differs from the measured
   asymmetric one. The gated test `the_output_is_asymmetric_as_the_hardware_is`
   covers the measured behaviour.
@@ -142,9 +177,6 @@ than the build with the measured data. The known differences:
   level relative to the voices and volume writes thump differently.
 - Noise: different output bit selection and reset seed, so the noise spectrum and
   sequence differ.
-- Power-on RAM in `sid-play`: an all-zero image instead of the captured pattern,
-  so tunes that read uninitialised memory can start differently.
-
-Candidate for the clean-room cutoff task: derive the closed corner from the
-datasheet formula with the C64's actual filter capacitors (to be sourced from a
-public schematic), not tuned to measured data.
+- Power-on RAM in `sid-play`: the documented image matches 973 of 1024 captured
+  bytes. The rest are undocumented, or values the sources leave ambiguous; see the
+  file's labels.
