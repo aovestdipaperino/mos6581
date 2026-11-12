@@ -54,9 +54,19 @@ pub fn clean_cutoff_table() -> &'static super::CutoffTable {
 }
 
 /// The built-in 6581 combined waveforms, compiled in every build so they can be
-/// compared with the measured ones. Today: the AND tables.
+/// compared with the measured ones. This is the clean-room combined-waveform
+/// model (see `docs/provenance.md`), no longer the AND tables.
 pub fn clean_waves() -> &'static WaveTables {
-    &WAVE_AND
+    static T: std::sync::OnceLock<WaveTables> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let c = super::clean_waves::combined_tables();
+        WaveTables {
+            st: c.st,
+            p_t: c.p_t,
+            ps_: c.ps_,
+            pst: c.pst,
+        }
+    })
 }
 
 #[cfg(test)]
@@ -87,7 +97,7 @@ mod tests {
         // Until a clean-room model lands, the seams return today's built-ins.
         let c = clean_cutoff_table();
         assert!((c.f0[1000] - super::super::clean_cutoff::cutoff_hz_6581(1000)).abs() < 1e-12);
-        assert!(std::ptr::eq(clean_waves(), &WAVE_AND));
+        assert_ne!(clean_waves().pst, clean_waves().st);
     }
 
     #[cfg(not(feature = "gpl-data"))]

@@ -4,6 +4,7 @@
 //! interact with each other through the resistor network.
 
 mod clean_cutoff;
+mod clean_waves;
 mod fc;
 
 pub mod default;
