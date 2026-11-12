@@ -109,36 +109,68 @@ pub const FILTER_Q_MIN: f64 = core::f64::consts::FRAC_1_SQRT_2;
 /// consistent with Yannes' description of a weak resonance.
 pub const FILTER_Q_STEPS: f64 = 8.0;
 
-/// DC term added to the routed voice sum before the master volume.
+/// DC at the mixer input, in units of one full-scale voice (`FULL_SCALE`).
 ///
-/// Source: Yannes interview: "By stopping an Oscillator, it was possible to
-/// apply a DC voltage to this D/A" and "Audio could then be created by having
-/// the microprocessor write the Final Volume register in real-time".
-/// Rationale (size and sign are an unsourced own choice): a non-zero DC is
-/// needed for $D418 playback to be audible; 0.5 makes a full-scale 4-bit
-/// volume sweep half a voice's normalised swing, loud but below a voice.
-/// Positive sign is arbitrary, since the output high-pass removes steady DC
-/// and the sign only sets the playback's phase.
-/// Placement in this emulator: the DC is added after the filter output and
-/// outside voice routing, out = (unfiltered + filtered + MIXER_DC) * volume,
-/// followed by a 1/3 mix scale and the output-stage high-pass. Consequence: a
-/// large volume step produces an audible click (real 6581s click too). The
-/// value is a tunable to be checked by ear, not a measurement.
-pub const MIXER_DC: f64 = 0.5;
+/// Model: `out = (unfiltered voices + filter output + MIXER_DC) * volume / 15`,
+/// then the board scales by 1/3 and AC-couples through a high-pass of a few
+/// tens of Hz.
+///
+/// What the sources support: Yannes (http://www.landley.net/history/mirror/commodore/yannes.html)
+/// says the final amp "was a 4-bit multiplying D/A converter" and that "By
+/// stopping an Oscillator, it was possible to apply a DC voltage to this D/A",
+/// which is how sampled audio was played through the Final Volume register. The
+/// C64 schematic (http://www.zimmers.net/anonftp/pub/cbm/schematics/computers/c64/ciasid.gif,
+/// U18 pin 27: "Audio output. Should be AC coupled to audio amp.") supports
+/// only that pin 27 carries DC. Together they support that a DC can be applied
+/// ahead of the volume DAC, and that the output pin carries DC.
+///
+/// Assumption (the author's, not established by the sources): that a standing
+/// DC sits above the volume DAC's reference even with all envelopes at zero, as
+/// the summed node's NMOS bias. Under that assumption each `$D418` write steps
+/// the output and the step survives the high-pass, which is the mechanism behind
+/// volume-register sample playback.
+///
+/// unsourced own choice: the magnitude 1.0 (4-bit sample playback about as loud
+/// as one full voice) and the positive sign (matching the voice offset
+/// direction).
+pub const MIXER_DC: f64 = 1.0;
 
-/// Waveform DAC value that represents zero signal.
+/// Waveform DAC code at which the envelope multiplier's output is zero.
 ///
-/// Source: own reasoning on the 12-bit waveform DAC range 0..4095 (MOS 6581
-/// datasheet, 12-bit waveform outputs). Rationale: an ideal-model centred DAC
-/// (real DAC non-linearity and offset are not modelled); 2048 is the
-/// midpoint code, so sawtooth, triangle and pulse at 50 % swing symmetrically.
-pub const VOICE_WAVE_ZERO: i32 = 2048;
+/// Model: each voice produces `(wave - VOICE_WAVE_ZERO) * level + VOICE_DC`,
+/// with `wave` the 12-bit waveform DAC code and `level` the 8-bit envelope.
+///
+/// Reasoning, all of it the author's assumption except the ladder formula: an
+/// R-2R ladder gives `Vout = Vlow + (Vhigh - Vlow) * D / 2^n`, the general
+/// Vlow/Vhigh form of the voltage-mode `Vout = Vref*D/2^n` on
+/// https://en.wikipedia.org/wiki/Resistor_ladder (section "Voltage mode").
+/// The ~0 to 4 V ladder span is unsourced: it assumes bit switches in a
+/// single-supply NMOS process pass a high level only about a threshold below
+/// 5 V logic, a pass-device threshold behaviour that is an assumption. The
+/// envelope multiplier's "zero signal" is defined here, as an assumption, to be
+/// the bias of the NMOS stage it feeds, assumed about 1 V (more with body
+/// effect). One volt of a ~4 V span is a quarter of the range, so code 1024
+/// rather than mid-scale 2048. The schematic's "should be AC coupled" note shows
+/// only that pin 27 carries DC; it does not show that this zero is off-centre.
+///
+/// Consequence of the choice: waveforms whose mean code is above 1024 (pulse,
+/// saw, triangle and noise average about 2048) have a mean that grows with
+/// `level`, so attack and release move the voice DC and the high-pass passes
+/// that as a thump, with positive sign.
+///
+/// unsourced own choice: 1024, resting on the unsourced 1 V / 4 V estimate.
+pub const VOICE_WAVE_ZERO: i32 = 1024;
 
-/// DC offset of a voice's output, in units of wave x level.
+/// Per-voice DC that does not scale with the envelope, in units of wave x level.
 ///
-/// Source: unsourced own choice. Rationale: with a centred DAC the voice adds
-/// no DC of its own; the DC that makes volume-register playback work is
-/// modelled once, in the mixer (`MIXER_DC`), rather than per voice.
+/// A constant per-voice offset is indistinguishable, after summing and the
+/// high-pass, from part of `MIXER_DC`, except where filter routing treats it
+/// differently. No source read gives such a term. Yannes mentions "signal
+/// leakage which occurred when the volume of the voice was supposed to be
+/// zero"; reading that as an AC leak, not a DC term, is the author's own
+/// reading, not Yannes's, and this model has no slot for it.
+///
+/// unsourced own choice: zero; any constant offset is carried by `MIXER_DC`.
 pub const VOICE_DC: i32 = 0;
 
 /// Noise LFSR bits wired to waveform output bits 11, 10, ..., 4.
@@ -291,8 +323,106 @@ mod tests {
         assert!(EXTFILT_W0_LOW * 1.0e-6 < 1.0);
     }
 
+    const FULL_SCALE: f64 = 4095.0 * 255.0;
+
+    fn voice(wave: i32, level: i32) -> f64 {
+        f64::from((wave - VOICE_WAVE_ZERO) * level + VOICE_DC) / FULL_SCALE
+    }
+
+    fn mix(voices: &[f64], filter_out: f64, volume: u8) -> f64 {
+        let sum: f64 = voices.iter().sum();
+        (sum + filter_out + MIXER_DC) * f64::from(volume) / 15.0 / 3.0
+    }
+
+    fn mean_voice(waves: impl Iterator<Item = i32>, level: i32) -> f64 {
+        let (mut acc, mut n) = (0.0, 0.0);
+        for w in waves {
+            acc += voice(w, level);
+            n += 1.0;
+        }
+        acc / n
+    }
+
+    fn pulse_50() -> impl Iterator<Item = i32> {
+        (0..4096).map(|i| if i < 2048 { 4095 } else { 0 })
+    }
+
     #[test]
-    fn wave_zero_is_dac_midpoint() {
-        assert!((VOICE_WAVE_ZERO - 2048).abs() <= 1);
+    fn constants_in_range() {
+        assert!((0..=4095).contains(&VOICE_WAVE_ZERO));
+        assert!(MIXER_DC.is_finite());
+    }
+
+    #[test]
+    fn volume_change_moves_output_with_all_voices_silent() {
+        let silent = [voice(2048, 0), voice(0, 0), voice(4095, 0)];
+        let mut prev = mix(&silent, 0.0, 0);
+        for vol in 1..=15 {
+            let cur = mix(&silent, 0.0, vol);
+            assert!((cur - prev).abs() > 1e-6, "volume {vol} produced no step");
+            prev = cur;
+        }
+    }
+
+    #[test]
+    fn volume_steps_are_linear_in_the_register() {
+        // 4-bit multiplying DAC: equal register steps give equal output steps.
+        let silent = [0.0; 3];
+        let step1 = mix(&silent, 0.0, 1) - mix(&silent, 0.0, 0);
+        let step15 = mix(&silent, 0.0, 15) - mix(&silent, 0.0, 14);
+        assert!((step1 - step15).abs() < 1e-12);
+    }
+
+    #[test]
+    fn full_envelope_pulse_mean_is_above_zero_envelope_mean() {
+        let on = mean_voice(pulse_50(), 255);
+        let off = mean_voice(pulse_50(), 0);
+        assert!(on > off, "gating a pulse should raise the voice DC");
+        // The thump is a sizeable fraction of a voice, not a rounding error.
+        assert!(on - off > 0.1);
+    }
+
+    #[test]
+    fn saw_and_triangle_also_thump_in_the_same_direction() {
+        let saw_on = mean_voice(0..4096, 255);
+        let saw_off = mean_voice(0..4096, 0);
+        assert!(saw_on > saw_off);
+        let tri = (0..4096).map(|i| if i < 2048 { i * 2 } else { (4095 - i) * 2 });
+        let tri_on = mean_voice(tri.clone(), 255);
+        let tri_off = mean_voice(tri, 0);
+        assert!(tri_on > tri_off);
+    }
+
+    #[test]
+    fn envelope_dc_is_monotonic_in_level() {
+        let mut prev = f64::NEG_INFINITY;
+        for level in 0..=255 {
+            let m = mean_voice(pulse_50(), level);
+            assert!(m > prev);
+            prev = m;
+        }
+    }
+
+    #[test]
+    fn zero_point_is_below_midscale() {
+        // A mid-scale code is above the multiplier's zero, so it carries
+        // positive signal that scales with the envelope.
+        assert!(voice(2048, 255) > voice(2048, 0));
+    }
+
+    #[test]
+    fn stopped_oscillator_gives_a_dc_the_volume_register_can_modulate() {
+        // Yannes: stop an oscillator, then write the volume register.
+        let held = [voice(4095, 255), 0.0, 0.0];
+        let silent = [0.0; 3];
+        let held_swing = mix(&held, 0.0, 15) - mix(&held, 0.0, 0);
+        let silent_swing = mix(&silent, 0.0, 15) - mix(&silent, 0.0, 0);
+        assert!(held_swing > silent_swing && silent_swing > 0.0);
+    }
+
+    #[test]
+    fn volume_zero_silences_everything() {
+        let loud = [voice(4095, 255), voice(4095, 255), voice(4095, 255)];
+        assert_eq!(mix(&loud, 0.5, 0), 0.0);
     }
 }
