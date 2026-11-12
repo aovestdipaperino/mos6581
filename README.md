@@ -6,7 +6,7 @@
 
 A cycle-stepped MOS 6581 SID chip emulator in Rust. The chip is stepped one Φ2
 cycle at a time and has no runtime dependencies in the default build. It is only
-the chip: no CPU, no memory map, no player. See `sid-play` for a PSID player built
+the chip: no CPU, no memory map, no player. See [`sid-play`](https://github.com/aovestdipaperino/sid-play) for a PSID player built
 on it.
 
 Licence: MIT OR Apache-2.0.
@@ -23,7 +23,7 @@ ways:
 - The envelope periods, voice and mixer DC, resonance, noise taps and the output
   stage constants come from the datasheet and public documents, or are plain
   choices. They are listed with their derivations in
-  [`docs/provenance.md`](https://github.com/aovestdipaperino/sid-play/blob/main/docs/provenance.md).
+  [`docs/provenance.md`](https://github.com/aovestdipaperino/mos6581/blob/main/docs/provenance.md).
 
 Building with `--features gpl-data` swaps in measured tables and constants from
 the `sid-gpl-data` crate (reSID data, GPL-2.0). That makes the resulting build
@@ -44,4 +44,4 @@ How far the default build is from the measured one:
   `gpl-data`, about 25x quieter.
 
 The full list of known gaps is in the "Known default-build fidelity gaps" section
-of [`docs/provenance.md`](https://github.com/aovestdipaperino/sid-play/blob/main/docs/provenance.md).
+of [`docs/provenance.md`](https://github.com/aovestdipaperino/mos6581/blob/main/docs/provenance.md).
