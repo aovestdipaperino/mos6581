@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Changed (both change the sound):
+- Clean-room DC model: voice DAC zero 1024, mixer DC 1.0. Low-frequency content (such as the 31 to 62 Hz band) and `$D418` sample playback levels move.
+- Clean-room output-stage transfer (an NMOS source follower into the board load), applied to the mixed output. Level and harmonic content move.
+The evidence and the honesty notes are in `docs/provenance.md`.
+
 ## 0.2.0 - 2026-11-12
 
 Breaking:

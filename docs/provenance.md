@@ -150,6 +150,42 @@ Feedback-driven values:
 
 Round 3 of the cutoff, which narrowed the top end by bisecting on the feedback, was not shipped for that reason. Round 3 did score marginally better on the median (0.682 against 0.689 octave). Shipping round 2 was a deliberate departure from the spec's "best round ships" rule, because round 3's top end came from bisecting on feedback.
 
+## Fidelity round of 2026-11-12: reference oracle, DC model, output stage, filter
+
+This round measured the default build against a reference player and then replaced the pieces that the comparison pointed at, again by clean-room authoring.
+
+### Method
+
+A private oracle renders each tune twice, once with this crate and once with VICE 3.10 `vsid` (engine: ReSID 6581), a public tool used as a reference player. It aligns the two renders by correlating octave-band spectrograms (offset 0 to 2.5 s), then reports the RMS dB distance over the octave bands from 31 Hz to 16 kHz. Each render is gain-normalised, with the absolute level reported separately, and each band is floored at -55 dBFS. The reference renders and the tool are private and never committed.
+
+The rule for using the reference has two halves. Clean-room authors get PASS or FAIL only, with the thresholds fixed before authoring and at most three rounds per item, exactly as in the previous round. The controller, who never writes the models, may compare renders directly to look for structural bugs in the harness. A fix found that way must be justified from public documents, and no observed number may be copied into the code. For the filter, rounds 4 to 6 used a second reference described below: a private bank of per-chip measurements of 45 real 6581s (not in this repository).
+
+### DC model
+
+The entry (commit 7b86bea) sets `VOICE_WAVE_ZERO` to 1024, `VOICE_DC` to 0 and `MIXER_DC` to 1.0. All three are the author's own choices, argued from NMOS bias reasoning, with no source. They passed every threshold in round 1: the 31 to 62 Hz band of `5_Title_Tunes` went from -12.8 dB to -1.0 dB against the reference, that tune's distance went from 6.5 to 2.6, and no other tune regressed. The reviewer, working from public sources only, found it clean with doc fixes, which were applied.
+
+### Output stage
+
+The entry (commit 2d30a92) models an NMOS source follower on 12 V driving the board's roughly 1 kOhm load, with a square law and a body effect. No round met the target-band threshold, which asked for the 125 to 250 Hz band of `Alternative_World_Games` to land within 3 dB of the reference (it moved from -9.2 to -6.9 dB). Round 2 shipped under the fallback rule, because it improved the tune's distance from 5.8 to 5.1 with no regression. The reviewer found it clean with doc fixes, which were applied.
+
+### Filter: not changed
+
+The cutoff curve and the resonance model were not changed. Rounds 1 to 3 used thresholds taken from VICE probes (the frequency and height of the resonant peak on a noise band-pass probe, plus target tunes). Every candidate failed, and every candidate got worse than the model already in place. One reason is that reSID caps its Q at about 1.7, which makes it a biased reference for resonance.
+
+Rounds 4 to 6 added a readable copy of the datasheet and switched to a data-level reference built from the 45 measured chips. The thresholds were: the cutoff at fc=0 inside the chips' p10 to p90 range (244 to 404 Hz); at least 14 of 16 points (fc = i*128+64) inside the chips' p10 to p90 band, under an assumed row mapping; and a normalised resonance-curve shape within 0.15 (the absolute Q unit is unknown). The filter in place scores a floor PASS, 13 of 16 points and a shape PASS. No round beat it, so it stays. The remaining gap is the top of the cutoff range, 12 kHz here against 16 to 21 kHz on real chips; the chip-to-chip spread in the mid range is about 4 octaves, so the middle is not a useful target.
+
+### Honesty notes
+
+The author's 1024 for `VOICE_WAVE_ZERO` equals an arbitrary value the controller had tried earlier in an exploratory direction check. The author was isolated from those notes, and 1024 is a natural quarter-scale choice, but the coincidence is recorded here.
+
+The output stage has two feedback-driven values: K went from 10 to 2 mA/V^2 and VG_BIAS from 7.5 to 6.0 V, both after seeing round results. Round 3 was not shipped. The DC model has no feedback-driven values, since it passed in round 1.
+
+| Item | Rounds | Outcome | Evaluator figures |
+|---|---|---|---|
+| DC model | 1 | Passed every threshold | `5_Title_Tunes` 31 to 62 Hz band -12.8 to -1.0 dB; distance 6.5 to 2.6; no regression |
+| Output stage | 2 shipped of 3 | Round 2 under the fallback rule; target band never met | `Alternative_World_Games` band -9.2 to -6.9 dB; distance 5.8 to 5.1; no regression |
+| Filter | 6 | Not changed | floor PASS, 13 of 16 points, shape PASS for the model in place; no round beat it |
+
 ## Known default-build fidelity gaps
 
 The default build (without `gpl-data`) is clean-room and measurably less faithful
@@ -163,18 +199,26 @@ than the measured data (via the private evaluator, before 0.2.0). The known diff
 - Combined waveforms: the clean-room tables are much closer to measured than the
   AND tables were (RMS of 255: `st` 49.9, `p_t` 86.5, `ps_` 28.2, `pst` 6.3). `p_t`
   is all zeros under the model, which is quieter than the real chip.
-- Voice model: the default voice is a centred DAC, which differs from the measured
-  asymmetric one, so the output lacks the asymmetry of the hardware.
+- Voice model: the voice DAC zero is now a clean-room 1024 (see the DC entry
+  above), which gives the voice its offset from centre. Whether that matches the
+  measured asymmetry beyond the bands the oracle checks is not established.
 - Envelope timing: the rate periods are derived from the datasheet's nominal
   attack times rather than measured, and the decay/release curve uses its own
   breakpoints, so envelope lengths and the shape of the falling curve differ.
 - ADSR delay bug: the rate counter does not skip zero on wrap
   (`ENV_RATE_COUNTER_SKIPS_ZERO` off), so the length of the delayed step after a
   rate rewrite differs.
-- Resonance: an own Q model with a different range, so resonant peaks differ in
-  height at every setting.
-- Mixer DC: an own size and sign, so `$D418` sample playback sits at a different
-  level relative to the voices and volume writes thump differently.
+- Resonance and cutoff: not changed by the fidelity round. The own Q model passes
+  the shape check against the measured-chip reference (within 0.15 once
+  normalised) and the cutoff at fc=0, but sits at 13 of 16 points. The cutoff top
+  is 12 kHz against 16 to 21 kHz on real chips, and the mid-range spread between
+  real chips (about 4 octaves) limits what any curve can match.
+- Mixer DC: now a clean-room 1.0 (see the DC entry above), so `$D418` sample
+  playback sits closer to the reference level relative to the voices.
+- Output stage: a clean-room source-follower model whose target band was never
+  met. The intermodulation band of `Alternative_World_Games` is still about 7 dB
+  low. The global level is about +1 dB against VICE (board gain, not chased), and
+  the residual floor of roughly -60 dB at envelope 0 is not modelled.
 - Noise: different output bit selection and reset seed, so the noise spectrum and
   sequence differ.
 - Power-on RAM in `sid-play`: the documented image matches 973 of 1024 captured
