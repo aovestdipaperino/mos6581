@@ -149,11 +149,13 @@ fn each_waveform_selection_reads_its_own_table() {
 /// to the same table, so the four combinations would read identically. They must not.
 #[test]
 fn the_combinations_are_mutually_distinct() {
-    // The three-way table is left out, as it was in the 0.1 default build.
+    // All four: the clean-room tables make the three-way table differ from
+    // saw+triangle, which the old AND tables did not.
     let combos = [
         wave::SAWTOOTH | wave::TRIANGLE,
         wave::PULSE | wave::TRIANGLE,
         wave::PULSE | wave::SAWTOOTH,
+        wave::PULSE | wave::SAWTOOTH | wave::TRIANGLE,
     ];
     let mut seen: Vec<Vec<u16>> = Vec::new();
     for ctrl in combos {
