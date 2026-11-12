@@ -3,6 +3,8 @@
 //! MIT OR Apache-2.0. The chip models are clean-room work; their sources and
 //! known gaps are listed in `docs/provenance.md`.
 
+mod clean_output;
+
 #[doc(hidden)]
 pub mod chip_data;
 pub mod envelope;

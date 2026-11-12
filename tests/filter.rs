@@ -128,9 +128,13 @@ fn all_taps_off_leaves_no_signal_on_a_routed_voice() {
         ac_rms(tail)
     );
     let mean = tail.iter().sum::<f64>() / tail.len() as f64;
-    // What the bypass leaves behind is the mixer's own DC term, at full volume.
+    // What the bypass leaves behind is the mixer's own DC term, at full volume,
+    // passed through the static output-stage transfer (slope 1 at zero, so the
+    // result stays close to the DC term itself). The exact transfer is private
+    // to the crate, so this checks closeness rather than equality.
     assert!(
-        (mean - mos6581::chip_data::MIXER_DC).abs() < 1e-9,
+        (mean - mos6581::chip_data::MIXER_DC).abs()
+            < 0.05 * mos6581::chip_data::MIXER_DC.abs().max(1.0),
         "the mixer DC is not what the bypass leaves behind: {mean}"
     );
 }

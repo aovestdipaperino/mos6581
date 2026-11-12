@@ -155,7 +155,9 @@ impl Filter {
             unfiltered += self.ext_in;
         }
 
-        self.out = (unfiltered + filtered + MIXER_DC) * self.volume;
+        // Static output-stage nonlinearity, see `crate::clean_output`.
+        self.out =
+            crate::clean_output::output_stage((unfiltered + filtered + MIXER_DC) * self.volume);
     }
 
     #[inline]
