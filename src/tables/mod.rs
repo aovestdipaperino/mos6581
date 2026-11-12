@@ -3,6 +3,7 @@
 //! table, because the hardware only needs a measurement where the output bits
 //! interact with each other through the resistor network.
 
+mod clean_cutoff;
 mod fc;
 
 pub mod default;

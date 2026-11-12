@@ -46,10 +46,11 @@ pub static WAVE_AND: WaveTables = and_tables();
 pub const CUTOFF_POINTS: &[(u32, f64)] = &[(0, 30.0), (2047, 12_000.0)];
 
 /// The built-in 6581 cutoff curve, compiled in every build so it can be compared
-/// with the measured one. Today: the linear datasheet curve.
+/// with the measured one. The clean-room VCR model (see docs/provenance.md), no
+/// longer the linear curve.
 pub fn clean_cutoff_table() -> &'static super::CutoffTable {
     static T: std::sync::OnceLock<super::CutoffTable> = std::sync::OnceLock::new();
-    T.get_or_init(|| super::fc::build(CUTOFF_POINTS))
+    T.get_or_init(|| super::fc::build_from(super::clean_cutoff::cutoff_hz_6581))
 }
 
 /// The built-in 6581 combined waveforms, compiled in every build so they can be
@@ -82,11 +83,10 @@ mod tests {
     }
 
     #[test]
-    fn the_clean_seams_carry_todays_defaults() {
+    fn the_clean_seams_carry_the_clean_models() {
         // Until a clean-room model lands, the seams return today's built-ins.
         let c = clean_cutoff_table();
-        assert!((c.f0[0] - 30.0).abs() < 1e-9);
-        assert!((c.f0[2047] - 12_000.0).abs() < 1e-9);
+        assert!((c.f0[1000] - super::super::clean_cutoff::cutoff_hz_6581(1000)).abs() < 1e-12);
         assert!(std::ptr::eq(clean_waves(), &WAVE_AND));
     }
 

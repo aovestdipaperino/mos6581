@@ -21,17 +21,21 @@ fn cutoff_spans_the_measured_6581_range() {
 
 #[cfg(not(feature = "gpl-data"))]
 #[test]
-fn the_default_cutoff_is_the_datasheet_linear_range() {
+fn the_default_cutoff_is_the_clean_room_curve() {
+    // The default build now uses the clean-room VCR model (docs/provenance.md),
+    // not the linear datasheet curve: check it is sane and monotonic.
     let lo = cutoff_hz(Model::Pal, 0);
     let hi = cutoff_hz(Model::Pal, 2047);
-    assert!((lo - 30.0).abs() < 0.5, "fc=0 gave {lo} Hz");
-    assert!((hi - 12_000.0).abs() < 1.0, "fc=2047 gave {hi} Hz");
-    let mid = cutoff_hz(Model::Pal, 1024);
-    let linear = 30.0 + (12_000.0 - 30.0) * 1024.0 / 2047.0;
     assert!(
-        (mid - linear).abs() < 1.0,
-        "fc=1024 gave {mid} Hz, linear is {linear}"
+        lo > 0.0 && lo < hi,
+        "fc=0 gave {lo} Hz, fc=2047 gave {hi} Hz"
     );
+    let mut prev = lo;
+    for fc in 1..=2047 {
+        let now = cutoff_hz(Model::Pal, fc);
+        assert!(now >= prev, "cutoff fell at fc={fc}: {prev} then {now}");
+        prev = now;
+    }
 }
 
 // The measured curve has a step the built-in linear one lacks.
