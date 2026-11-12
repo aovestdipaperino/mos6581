@@ -55,17 +55,11 @@ pub fn clean_cutoff_table() -> &'static super::CutoffTable {
 
 /// The built-in 6581 combined waveforms: the clean-room combined-waveform model
 /// (see `docs/provenance.md`), no longer the AND tables.
+///
+/// The tables are precomputed in `clean_waves_data.rs`; solving the model on
+/// first use cost about 0.6 s in release and 13 s in debug per process.
 pub fn clean_waves() -> &'static WaveTables {
-    static T: std::sync::OnceLock<WaveTables> = std::sync::OnceLock::new();
-    T.get_or_init(|| {
-        let c = super::clean_waves::combined_tables();
-        WaveTables {
-            st: c.st,
-            p_t: c.p_t,
-            ps_: c.ps_,
-            pst: c.pst,
-        }
-    })
+    &super::clean_waves_data::CLEAN_WAVES
 }
 
 #[cfg(test)]
@@ -93,7 +87,6 @@ mod tests {
 
     #[test]
     fn the_clean_seams_carry_the_clean_models() {
-        // Until a clean-room model lands, the seams return today's built-ins.
         let c = clean_cutoff_table();
         assert!((c.f0[1000] - super::super::clean_cutoff::cutoff_hz_6581(1000)).abs() < 1e-12);
         assert_ne!(clean_waves().pst, clean_waves().st);
@@ -105,5 +98,56 @@ mod tests {
         assert!(std::ptr::eq(w, clean_waves()));
         let c = crate::tables::cutoff_table(crate::Model::Pal);
         assert!(std::ptr::eq(c, clean_cutoff_table()));
+    }
+
+    /// The precomputed constant must equal what the model produces.
+    ///
+    /// Solving the model takes about 13 s in a debug build, so this runs only
+    /// in release builds (`cargo test --release`).
+    #[test]
+    #[cfg_attr(debug_assertions, ignore)]
+    fn the_precomputed_waves_match_the_model() {
+        let c = crate::tables::clean_waves::combined_tables();
+        let w = clean_waves();
+        assert!(c.st == w.st, "st drifted from the model");
+        assert!(c.p_t == w.p_t, "p_t drifted from the model");
+        assert!(c.ps_ == w.ps_, "ps_ drifted from the model");
+        assert!(c.pst == w.pst, "pst drifted from the model");
+    }
+
+    /// Rewrites `src/tables/clean_waves_data.rs` from the model. Run with
+    /// `cargo test --release regenerate_clean_waves_data -- --ignored`.
+    #[test]
+    #[ignore = "regenerates src/tables/clean_waves_data.rs"]
+    fn regenerate_clean_waves_data() {
+        use std::fmt::Write;
+        let c = crate::tables::clean_waves::combined_tables();
+        let mut out = String::from(
+            "//! Generated from the clean-room model in `clean_waves.rs`; do not edit.\n\
+             //! Regenerate with `cargo test --release regenerate_clean_waves_data -- --ignored`.\n\
+             //! The test `the_precomputed_waves_match_the_model` keeps it in step.\n\n\
+             use super::WaveTables;\n\n\
+             #[rustfmt::skip]\n\
+             pub(crate) static CLEAN_WAVES: WaveTables = WaveTables {\n",
+        );
+        for (name, t) in [
+            ("st", &c.st),
+            ("p_t", &c.p_t),
+            ("ps_", &c.ps_),
+            ("pst", &c.pst),
+        ] {
+            writeln!(out, "    {name}: [").unwrap();
+            for row in t.chunks(16) {
+                let v: Vec<String> = row.iter().map(|b| format!("{b:#04x}")).collect();
+                writeln!(out, "        {},", v.join(", ")).unwrap();
+            }
+            out.push_str("    ],\n");
+        }
+        out.push_str("};\n");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tables/clean_waves_data.rs"
+        );
+        std::fs::write(path, out).unwrap();
     }
 }

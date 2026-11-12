@@ -158,7 +158,7 @@ fn routing_through_the_filter_takes_effect_on_the_write() {
     sid.write(23, 0x01); // route voice 1 through the filter, resonance 0
     let mut after = vec![0.0f32; 44_100];
     sid.render(&mut after);
-    // Measured well past the output stage's 9.7 ms high-pass, so the step from the
+    // Measured well past the output stage's high-pass (about 10 ms), so the step from the
     // routing change itself has long since decayed.
     let routed = rms(&after[20_000..]);
     assert!(

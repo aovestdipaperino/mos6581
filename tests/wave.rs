@@ -61,9 +61,9 @@ fn test_bit_holds_the_accumulator_and_forces_pulse_high() {
 }
 
 #[test]
-fn combined_waveforms_come_from_the_measurement_tables() {
+fn pulse_triangle_is_quieter_than_triangle_alone() {
     // Pulse+triangle is not the bitwise AND of the two generated shapes: the
-    // measured table loses amplitude to the resistor network.
+    // clean model's `p_t` table (all zeros) loses amplitude to the resistor network.
     let mut w = wave_obj();
     let combo = sweep(&mut w, wave::PULSE | wave::TRIANGLE, 0);
     let max_combo = *combo.iter().max().unwrap();
@@ -73,7 +73,7 @@ fn combined_waveforms_come_from_the_measurement_tables() {
     assert!(
         max_combo < max_tri,
         "pulse+triangle reached {max_combo} against triangle {max_tri}; \
-         it is not coming from the measured table"
+         it is not coming from the clean combined table"
     );
 }
 

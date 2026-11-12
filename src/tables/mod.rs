@@ -4,7 +4,10 @@
 //! interact with each other through the resistor network.
 
 mod clean_cutoff;
+// The model is only the source of `clean_waves_data`; it is built for tests.
+#[cfg(test)]
 mod clean_waves;
+mod clean_waves_data;
 mod fc;
 
 pub mod default;

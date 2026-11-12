@@ -8,6 +8,7 @@ Breaking:
 
 Changed:
 - New clean-room 6581 filter cutoff curve and combined waveforms replace the linear datasheet curve and the AND tables. The previous built-ins stay in `tables::default` (`CUTOFF_POINTS`, `WAVE_AND`) as reference baselines. How close the new models come to the measured chip is recorded in `docs/provenance.md`.
+- The combined-waveform tables are precomputed (`src/tables/clean_waves_data.rs`, regenerated from the model by an ignored test) instead of solved on first use, removing about 0.6 s (release) or 13 s (debug) of startup per process.
 
 ## 0.1.1 / 0.1.0
 
