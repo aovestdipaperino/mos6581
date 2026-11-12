@@ -1,25 +1,6 @@
 use mos6581::Model;
 use mos6581::tables::cutoff_hz;
 
-// Asserts facts of the measured curve, which needs the borrowed data.
-#[cfg(feature = "gpl-data")]
-#[test]
-fn cutoff_spans_the_measured_6581_range() {
-    let points = sid_gpl_data::CUTOFF_POINTS_6581;
-    let (first, last) = (points[0].1, points[points.len() - 1].1);
-    let lo = cutoff_hz(Model::Pal, 0);
-    let hi = cutoff_hz(Model::Pal, 2047);
-    assert!(
-        (lo - first).abs() < 1e-6,
-        "fc=0 gave {lo} Hz, data says {first}"
-    );
-    assert!(
-        (hi - last).abs() < 1e-6,
-        "fc=2047 gave {hi} Hz, data says {last}"
-    );
-}
-
-#[cfg(not(feature = "gpl-data"))]
 #[test]
 fn the_default_cutoff_is_the_clean_room_curve() {
     // The default build now uses the clean-room VCR model (docs/provenance.md),
@@ -34,24 +15,6 @@ fn the_default_cutoff_is_the_clean_room_curve() {
     for fc in 1..=2047 {
         let now = cutoff_hz(Model::Pal, fc);
         assert!(now >= prev, "cutoff fell at fc={fc}: {prev} then {now}");
-        prev = now;
-    }
-}
-
-// The measured curve has a step the built-in linear one lacks.
-#[cfg(feature = "gpl-data")]
-#[test]
-fn cutoff_rises_monotonically_except_at_the_top_of_the_low_half() {
-    // The measured curve has a discontinuity where the high nibble of the cutoff
-    // register rolls over: the corner drops, then climbs again.
-    let a = cutoff_hz(Model::Pal, 1023);
-    let b = cutoff_hz(Model::Pal, 1024);
-    assert!(b < a, "expected a drop at fc=1024, got {a} then {b}");
-
-    let mut prev = cutoff_hz(Model::Pal, 1024);
-    for fc in 1025..=2047 {
-        let now = cutoff_hz(Model::Pal, fc);
-        assert!(now >= prev, "not monotone above the discontinuity at {fc}");
         prev = now;
     }
 }

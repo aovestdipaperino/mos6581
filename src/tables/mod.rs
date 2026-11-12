@@ -1,4 +1,4 @@
-//! Combined-waveform tables (built-in, or measured with `gpl-data`). Every table here is a *combination* of waveforms:
+//! Combined-waveform tables. Every table here is a *combination* of waveforms:
 //! pure sawtooth, triangle, pulse and noise are generated directly and have no
 //! table, because the hardware only needs a measurement where the output bits
 //! interact with each other through the resistor network.
@@ -22,34 +22,14 @@ pub struct WaveTables {
     pub pst: [u8; 4096],
 }
 
-#[cfg(feature = "gpl-data")]
-const fn from_data(d: sid_gpl_data::WaveData) -> WaveTables {
-    WaveTables {
-        st: d.st,
-        p_t: d.p_t,
-        ps_: d.ps_,
-        pst: d.pst,
-    }
-}
-
-#[cfg(feature = "gpl-data")]
-/// Measured 6581 combined waveforms (reSID data, GPL-2.0, via `sid-gpl-data`).
-pub static WAVE6581: WaveTables = from_data(sid_gpl_data::WAVE6581);
-#[cfg(feature = "gpl-data")]
-/// Measured 8580 combined waveforms (reSID data, GPL-2.0, via `sid-gpl-data`).
-pub static WAVE8580: WaveTables = from_data(sid_gpl_data::WAVE8580);
-
 /// The 6581 is the modelled chip, so both clock variants share its tables.
 pub fn for_model(model: crate::Model) -> &'static WaveTables {
     match model {
-        #[cfg(feature = "gpl-data")]
-        crate::Model::Ntsc | crate::Model::Pal => &WAVE6581,
-        #[cfg(not(feature = "gpl-data"))]
         crate::Model::Ntsc | crate::Model::Pal => default::clean_waves(),
     }
 }
 
-pub use fc::{CutoffTable, cutoff_table, cutoff_table_8580};
+pub use fc::{CutoffTable, cutoff_table};
 
 /// Centre frequency for an 11-bit cutoff value. Values above the register's
 /// range clamp to the top rather than wrapping: a tune that writes past 2047
@@ -65,7 +45,5 @@ mod tests {
         let a = super::for_model(crate::Model::Pal);
         let b = super::for_model(crate::Model::Ntsc);
         assert!(std::ptr::eq(a, b), "the two clock rates resolved apart");
-        #[cfg(feature = "gpl-data")]
-        assert!(!std::ptr::eq(&super::WAVE6581, &super::WAVE8580));
     }
 }

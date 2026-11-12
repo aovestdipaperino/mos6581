@@ -1,5 +1,6 @@
-//! Built-in data used when the `gpl-data` feature is off. Our own derivations,
-//! MIT OR Apache-2.0.
+//! Built-in data: the clean-room cutoff curve and combined waveforms the chip
+//! uses, plus the earlier textbook baselines kept for reference. Our own
+//! derivations, MIT OR Apache-2.0.
 
 use super::WaveTables;
 
@@ -36,26 +37,24 @@ const fn and_tables() -> WaveTables {
 
 /// Combined waveforms approximated as the bitwise AND of the pure waveforms:
 /// the textbook model. Real silicon is quieter and less regular on combined
-/// waveforms; the `gpl-data` feature swaps in measured tables.
+/// waveforms. A reference baseline only: the chip uses `clean_waves`.
 pub static WAVE_AND: WaveTables = and_tables();
 
 /// Cutoff points for the built-in curve: linear over the MOS 6581 datasheet's
 /// nominal filter range, "approximately 30 Hz - 12 kHz" with 2200 pF filter
-/// capacitors. The C64 fits other values and real chips vary; the `gpl-data`
-/// feature swaps in measured curves.
+/// capacitors. The C64 fits other values and real chips vary. A reference
+/// baseline only: the chip uses `clean_cutoff_table`.
 pub const CUTOFF_POINTS: &[(u32, f64)] = &[(0, 30.0), (2047, 12_000.0)];
 
-/// The built-in 6581 cutoff curve, compiled in every build so it can be compared
-/// with the measured one. The clean-room VCR model (see docs/provenance.md), no
-/// longer the linear curve.
+/// The built-in 6581 cutoff curve: the clean-room VCR model (see
+/// docs/provenance.md), no longer the linear curve.
 pub fn clean_cutoff_table() -> &'static super::CutoffTable {
     static T: std::sync::OnceLock<super::CutoffTable> = std::sync::OnceLock::new();
     T.get_or_init(|| super::fc::build_from(super::clean_cutoff::cutoff_hz_6581))
 }
 
-/// The built-in 6581 combined waveforms, compiled in every build so they can be
-/// compared with the measured ones. This is the clean-room combined-waveform
-/// model (see `docs/provenance.md`), no longer the AND tables.
+/// The built-in 6581 combined waveforms: the clean-room combined-waveform model
+/// (see `docs/provenance.md`), no longer the AND tables.
 pub fn clean_waves() -> &'static WaveTables {
     static T: std::sync::OnceLock<WaveTables> = std::sync::OnceLock::new();
     T.get_or_init(|| {
@@ -100,7 +99,6 @@ mod tests {
         assert_ne!(clean_waves().pst, clean_waves().st);
     }
 
-    #[cfg(not(feature = "gpl-data"))]
     #[test]
     fn the_default_build_routes_through_the_seams() {
         let w = crate::tables::for_model(crate::Model::Pal);

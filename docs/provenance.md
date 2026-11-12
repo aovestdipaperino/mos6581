@@ -180,3 +180,9 @@ than the build with the measured data. The known differences:
 - Power-on RAM in `sid-play`: the documented image matches 973 of 1024 captured
   bytes. The rest are undocumented, or values the sources leave ambiguous; see the
   file's labels.
+
+## 0.2.0: gpl-data removed (2026-11-12)
+
+The `gpl-data` feature and the optional `sid-gpl-data` dependency are gone. mos6581 has no GPL code or data and no optional GPL path: every build is the clean-room build described above, under MIT OR Apache-2.0.
+The audit tables and the "with/without `gpl-data`" wording above are history. The tests that read the measured data, including `the_output_is_asymmetric_as_the_hardware_is`, and the gap test were removed with the feature; the gaps listed above remain.
+The `sid-gpl-data` crate itself still exists and is unchanged.

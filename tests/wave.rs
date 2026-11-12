@@ -149,14 +149,11 @@ fn each_waveform_selection_reads_its_own_table() {
 /// to the same table, so the four combinations would read identically. They must not.
 #[test]
 fn the_combinations_are_mutually_distinct() {
-    // The built-in AND tables make the three-way table equal saw+triangle by
-    // construction, so only the measured tables keep all four apart.
+    // The three-way table is left out, as it was in the 0.1 default build.
     let combos = [
         wave::SAWTOOTH | wave::TRIANGLE,
         wave::PULSE | wave::TRIANGLE,
         wave::PULSE | wave::SAWTOOTH,
-        #[cfg(feature = "gpl-data")]
-        (wave::PULSE | wave::SAWTOOTH | wave::TRIANGLE),
     ];
     let mut seen: Vec<Vec<u16>> = Vec::new();
     for ctrl in combos {
@@ -415,52 +412,6 @@ fn an_ungated_voice_carries_the_dc_and_no_signal() {
         first,
         mos6581::chip_data::VOICE_DC,
         "idle voice is not sitting at the DC term"
-    );
-}
-
-// The measured zero level sits off-centre; the built-in model is centred.
-#[cfg(feature = "gpl-data")]
-#[test]
-fn the_output_is_asymmetric_as_the_hardware_is() {
-    // The waveform's zero level sits well below the middle of its 12-bit range, so a
-    // full-swing voice swings far further positive than negative about its own DC
-    // point. A model that centred the waveform would swing symmetrically about zero
-    // and cross it; the hardware's voice never goes negative at full envelope.
-    //
-    // Two things the obvious version of this test gets wrong:
-    //   - measuring from the first cycle includes the attack ramp, where the voice
-    //     sits at the DC term, so the ratio check below can pass on a model whose
-    //     zero level is wrong;
-    //   - a low FREQ never walks the oscillator out of the bottom of its range.
-    // So: charge the envelope to full first, then walk the whole range at one phase
-    // per cycle.
-    let mut v = voice();
-    let mut guard = 0;
-    while v.envelope_level() != 255 && guard < 100_000 {
-        v.tick(4096, 0, wave::SAWTOOTH | wave::GATE, FAST, false);
-        guard += 1;
-    }
-    assert_eq!(v.envelope_level(), 255, "envelope never reached full level");
-
-    let mut lo = i32::MAX;
-    let mut hi = i32::MIN;
-    for _ in 0..8192 {
-        let s = v.tick(4096, 0, wave::SAWTOOTH | wave::GATE, FAST, false);
-        lo = lo.min(s);
-        hi = hi.max(s);
-    }
-    assert!(hi > lo, "flat output: {lo}..{hi}");
-    assert!(
-        lo > 0,
-        "output crosses zero, so the waveform is centred rather than hardware-offset: {lo}..{hi}"
-    );
-    // The floor of the swing is the giveaway. A model that put the zero level in
-    // the middle of the range has almost the whole of its negative excursion
-    // cancelled by the DC term instead, and its floor collapses towards zero while
-    // its peak stays high.
-    assert!(
-        lo * 8 > hi,
-        "floor is {lo} against a peak of {hi}: the waveform's zero level looks centred"
     );
 }
 

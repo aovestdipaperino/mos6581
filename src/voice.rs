@@ -9,8 +9,7 @@ use crate::wave::Wave;
 /// 12-bit waveform range times the full envelope level.
 ///
 /// Where a full-envelope voice's swing sits relative to zero depends on
-/// `VOICE_WAVE_ZERO` and `VOICE_DC` from `chip_data`, which differ between the
-/// built-in and the `gpl-data` constants. Any steady offset is removed
+/// `VOICE_WAVE_ZERO` and `VOICE_DC` from `chip_data`. Any steady offset is removed
 /// downstream by the output stage's high-pass, not here.
 pub const FULL_SCALE: f64 = (0x0fff * 0xff) as f64;
 

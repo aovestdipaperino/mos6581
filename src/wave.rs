@@ -1,5 +1,4 @@
-//! Oscillator: 24-bit phase accumulator, combined-waveform tables (built-in, or
-//! measured with `gpl-data`), noise.
+//! Oscillator: 24-bit phase accumulator, combined-waveform tables, noise.
 
 use crate::chip_data;
 use crate::tables::WaveTables;
