@@ -43,7 +43,7 @@ pub fn for_model(model: crate::Model) -> &'static WaveTables {
         #[cfg(feature = "gpl-data")]
         crate::Model::Ntsc | crate::Model::Pal => &WAVE6581,
         #[cfg(not(feature = "gpl-data"))]
-        crate::Model::Ntsc | crate::Model::Pal => &default::WAVE_AND,
+        crate::Model::Ntsc | crate::Model::Pal => default::clean_waves(),
     }
 }
 

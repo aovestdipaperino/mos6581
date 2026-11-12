@@ -51,11 +51,20 @@ fn tangents(points: &[(u32, f64)]) -> Vec<f64> {
     d
 }
 
-fn build(points: &[(u32, f64)]) -> CutoffTable {
-    let d = tangents(points);
-    let mut f0 = [points[0].1; 2048];
+/// A table from a function of the register value, for curves given as a model
+/// rather than as points.
+pub(crate) fn build_from(f: impl Fn(u16) -> f64) -> CutoffTable {
+    let mut f0 = [0.0; 2048];
     for (i, slot) in f0.iter_mut().enumerate() {
-        let x = f64::from(i as u32);
+        *slot = f(i as u16);
+    }
+    CutoffTable { f0 }
+}
+
+pub(crate) fn build(points: &[(u32, f64)]) -> CutoffTable {
+    let d = tangents(points);
+    build_from(|i| {
+        let x = f64::from(i);
         // Index of the last point at or before x.
         let mut k = 0usize;
         for (j, &(fx, _)) in points.iter().enumerate() {
@@ -68,19 +77,17 @@ fn build(points: &[(u32, f64)]) -> CutoffTable {
         let (x1, y1) = points[k];
         let (x2, y2) = points[(k + 1).min(points.len() - 1)];
         if x2 == x1 {
-            *slot = y2;
-            continue;
+            return y2;
         }
         let h = f64::from(x2 - x1);
         let t = ((x - f64::from(x1)) / h).clamp(0.0, 1.0);
         let t2 = t * t;
         let t3 = t2 * t;
-        *slot = (2.0 * t3 - 3.0 * t2 + 1.0) * y1
+        (2.0 * t3 - 3.0 * t2 + 1.0) * y1
             + (t3 - 2.0 * t2 + t) * h * d[k]
             + (-2.0 * t3 + 3.0 * t2) * y2
-            + (t3 - t2) * h * d[k + 1];
-    }
-    CutoffTable { f0 }
+            + (t3 - t2) * h * d[k + 1]
+    })
 }
 
 #[cfg(feature = "gpl-data")]
@@ -88,17 +95,20 @@ const POINTS_6581: &[(u32, f64)] = sid_gpl_data::CUTOFF_POINTS_6581;
 #[cfg(feature = "gpl-data")]
 const POINTS_8580: &[(u32, f64)] = sid_gpl_data::CUTOFF_POINTS_8580;
 #[cfg(not(feature = "gpl-data"))]
-const POINTS_6581: &[(u32, f64)] = super::default::CUTOFF_POINTS;
-#[cfg(not(feature = "gpl-data"))]
 const POINTS_8580: &[(u32, f64)] = super::default::CUTOFF_POINTS;
 
+#[cfg(feature = "gpl-data")]
 static CUTOFF_6581: std::sync::OnceLock<CutoffTable> = std::sync::OnceLock::new();
 static CUTOFF_8580: std::sync::OnceLock<CutoffTable> = std::sync::OnceLock::new();
 
-/// The 6581 is the modelled chip, so both clock variants share its curve.
+/// The 6581 is the modelled chip, so both clock variants share its curve. Without
+/// `gpl-data` it comes from the `default::clean_cutoff_table` seam.
 pub fn cutoff_table(model: crate::Model) -> &'static CutoffTable {
     match model {
+        #[cfg(feature = "gpl-data")]
         crate::Model::Pal | crate::Model::Ntsc => CUTOFF_6581.get_or_init(|| build(POINTS_6581)),
+        #[cfg(not(feature = "gpl-data"))]
+        crate::Model::Pal | crate::Model::Ntsc => super::default::clean_cutoff_table(),
     }
 }
 

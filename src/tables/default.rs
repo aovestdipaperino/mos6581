@@ -45,6 +45,19 @@ pub static WAVE_AND: WaveTables = and_tables();
 /// feature swaps in measured curves.
 pub const CUTOFF_POINTS: &[(u32, f64)] = &[(0, 30.0), (2047, 12_000.0)];
 
+/// The built-in 6581 cutoff curve, compiled in every build so it can be compared
+/// with the measured one. Today: the linear datasheet curve.
+pub fn clean_cutoff_table() -> &'static super::CutoffTable {
+    static T: std::sync::OnceLock<super::CutoffTable> = std::sync::OnceLock::new();
+    T.get_or_init(|| super::fc::build(CUTOFF_POINTS))
+}
+
+/// The built-in 6581 combined waveforms, compiled in every build so they can be
+/// compared with the measured ones. Today: the AND tables.
+pub fn clean_waves() -> &'static WaveTables {
+    &WAVE_AND
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +79,23 @@ mod tests {
     #[test]
     fn three_way_matches_saw_triangle() {
         assert_eq!(WAVE_AND.pst, WAVE_AND.st);
+    }
+
+    #[test]
+    fn the_clean_seams_carry_todays_defaults() {
+        // Until a clean-room model lands, the seams return today's built-ins.
+        let c = clean_cutoff_table();
+        assert!((c.f0[0] - 30.0).abs() < 1e-9);
+        assert!((c.f0[2047] - 12_000.0).abs() < 1e-9);
+        assert!(std::ptr::eq(clean_waves(), &WAVE_AND));
+    }
+
+    #[cfg(not(feature = "gpl-data"))]
+    #[test]
+    fn the_default_build_routes_through_the_seams() {
+        let w = crate::tables::for_model(crate::Model::Pal);
+        assert!(std::ptr::eq(w, clean_waves()));
+        let c = crate::tables::cutoff_table(crate::Model::Pal);
+        assert!(std::ptr::eq(c, clean_cutoff_table()));
     }
 }
