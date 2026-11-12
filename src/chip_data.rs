@@ -111,9 +111,10 @@ pub const FILTER_Q_STEPS: f64 = 8.0;
 
 /// DC at the mixer input, in units of one full-scale voice (`FULL_SCALE`).
 ///
-/// Model: `out = (unfiltered voices + filter output + MIXER_DC) * volume / 15`,
-/// then the board scales by 1/3 and AC-couples through a high-pass of a few
-/// tens of Hz.
+/// Model: `mixed = (unfiltered voices + filter output + MIXER_DC) * volume / 15`,
+/// then the output stage (`clean_output::output_stage`, the static NMOS
+/// source-follower transfer) maps `mixed`, then the board scales by 1/3 and
+/// AC-couples through a high-pass of a few tens of Hz.
 ///
 /// What the sources support: Yannes (http://www.landley.net/history/mirror/commodore/yannes.html)
 /// says the final amp "was a 4-bit multiplying D/A converter" and that "By

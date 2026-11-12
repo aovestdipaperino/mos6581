@@ -3,10 +3,13 @@
 //!
 //! # What is modelled
 //!
-//! The emulator hands this function the mixed, volume-scaled signal `x`
-//! (one full-scale voice swings about ±1, music sits within about ±2, and the
-//! whole range is roughly [-4, +4]). On the chip this signal is a voltage
-//! produced by analogue stages that the author infers are NMOS on the 12 V
+//! The emulator hands this function the mixed, volume-scaled signal `x`.
+//! Integration note (how the emulator feeds the stage, not part of the
+//! author's model): with the voice DAC zero at 1024, one full-envelope voice
+//! spans about -0.25 to +0.75, i.e. 1 unit peak to peak; music sits within
+//! about ±2, and the whole range is roughly [-4, +4].
+//!
+//! On the chip this signal is a voltage produced by analogue stages that the author infers are NMOS on the 12 V
 //! supply, driving an on-chip source-follower buffer whose source the author
 //! infers is the AUDIO OUT pin (pin 27). Only the pin-28 12 V supply is
 //! sourced; the 12 V analogue stages and the on-chip source follower are the
@@ -47,7 +50,8 @@
 //! `V_g(V_out) = V_out + V_t0 + γ (sqrt(V_out + 2φ) - sqrt(2φ)) + sqrt(2 V_out / (k R_L))`
 //!
 //! This is strictly increasing in `V_out`, so it has a unique inverse, which
-//! [`output_stage`] evaluates numerically. Its slope
+//! [`output_stage_exact`] evaluates numerically. [`output_stage`] is the same
+//! transfer read from a table precomputed once from the exact solver. Its slope
 //! `dV_out/dV_g = 1 / (1 + γ / (2 sqrt(V_out + 2φ)) + 1 / sqrt(2 k R_L V_out))`
 //! is below one and grows with `V_out`: the follower is a slightly expansive,
 //! asymmetric (even-order dominated) nonlinearity. Feeding it several voices
@@ -134,8 +138,10 @@ const VG_BIAS: f64 = 6.0;
 
 /// Gate-voltage swing per unit of x, V.
 /// unsourced own choice (the rationale below is after the fact): maps x = ±4 to ±3 V at the gate (3 V to 9 V with the round 2 bias),
-/// i.e. one full-scale voice is about 1.5 V peak to peak, the largest swing
-/// that stays inside the supply with headroom for the driving stage.
+/// the largest swing that stays inside the supply with headroom for the
+/// driving stage. Integration note: one full-envelope voice spans about 1 unit
+/// (-0.25 to +0.75 with the voice DAC zero at 1024), so it swings about 0.75 V
+/// peak to peak at the gate.
 const VOLTS_PER_UNIT: f64 = 0.75;
 
 /// Effective DC load on pin 27: R8 in parallel with R9 plus the reflected
@@ -181,14 +187,17 @@ fn follower_slope(vout: f64) -> f64 {
     1.0 / d
 }
 
-/// Static transfer of the 6581 output stage in emulator units.
+/// Static transfer of the 6581 output stage in emulator units, solved exactly.
 ///
 /// Maps the mixer value `x` to the gate of the NMOS source follower, solves
 /// the follower, and returns the output relative to its value at `x = 0`,
 /// scaled so that the slope at `x = 0` is 1. Continuous, monotonic
 /// non-decreasing and finite for every finite `x`. Non-finite input is
 /// treated by clamping (NaN maps to 0).
-pub fn output_stage(x: f64) -> f64 {
+///
+/// This runs a 64-step bisection, too slow for every Φ2 cycle; the emulator
+/// calls [`output_stage`], which tabulates this function.
+pub fn output_stage_exact(x: f64) -> f64 {
     static OPERATING_POINT: OnceLock<(f64, f64)> = OnceLock::new();
     let x = if x.is_nan() { 0.0 } else { x };
     let &(v0, gain0) = OPERATING_POINT.get_or_init(|| {
@@ -199,10 +208,109 @@ pub fn output_stage(x: f64) -> f64 {
     (v - v0) / gain0
 }
 
+/// Lower end of the tabulated input range. Music sits within about ±2 and the
+/// whole range is roughly [-4, +4], so [-8, +8] covers it with margin.
+const LUT_MIN: f64 = -8.0;
+/// Upper end of the tabulated input range.
+const LUT_MAX: f64 = 8.0;
+/// Table entries per unit of `x`; a power of two, so every grid point
+/// `LUT_MIN + i / LUT_PER_UNIT` is exact in binary.
+const LUT_PER_UNIT: f64 = 1024.0;
+/// Number of table entries, both endpoints included.
+const LUT_LEN: usize = 16 * 1024 + 1;
+
+/// The exact transfer sampled on the grid, built once on first use.
+fn table() -> &'static [f64] {
+    static TABLE: OnceLock<Box<[f64]>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        (0..LUT_LEN)
+            .map(|i| output_stage_exact(LUT_MIN + i as f64 / LUT_PER_UNIT))
+            .collect()
+    })
+}
+
+/// Static transfer of the 6581 output stage in emulator units.
+///
+/// Inside [-8, +8] this interpolates linearly in a table of
+/// [`output_stage_exact`] (16385 points, spacing 1/1024); outside it, and for
+/// NaN, it calls the exact solver. Linear interpolation between samples of a
+/// monotonic function is monotonic and continuous, and the table ends match
+/// the exact solver, so the properties of the exact transfer carry over. The
+/// worst-case deviation from the exact solver is checked by a test.
+#[inline]
+pub fn output_stage(x: f64) -> f64 {
+    // The negated test also sends NaN to the exact path.
+    if !(LUT_MIN..=LUT_MAX).contains(&x) {
+        return output_stage_exact(x);
+    }
+    let t = table();
+    let pos = (x - LUT_MIN) * LUT_PER_UNIT;
+    // `pos` is in [0, LUT_LEN - 1]; the last segment also serves x = LUT_MAX.
+    let i = (pos as usize).min(LUT_LEN - 2);
+    let frac = pos - i as f64;
+    t[i] + frac * (t[i + 1] - t[i])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::f64::consts::PI;
+
+    /// About twice the measured worst-case table error (2.53e-7, at the
+    /// follower's cut-off near x = -6.67, where the curvature is largest).
+    const TABLE_ERROR_BOUND: f64 = 5e-7;
+
+    /// Worst-case `|output_stage(x) - output_stage_exact(x)|` over a dense
+    /// sweep of the table range, plus every grid point and segment midpoint.
+    fn worst_table_error() -> (f64, f64) {
+        let mut worst = (0.0_f64, 0.0_f64);
+        let mut check = |x: f64| {
+            let e = (output_stage(x) - output_stage_exact(x)).abs();
+            if e > worst.0 {
+                worst = (e, x);
+            }
+        };
+        for i in 0..LUT_LEN {
+            let x = LUT_MIN + i as f64 / LUT_PER_UNIT;
+            check(x);
+            if i + 1 < LUT_LEN {
+                check(x + 0.5 / LUT_PER_UNIT);
+            }
+        }
+        // Dense sweep, not aligned with the grid.
+        let n = 200_000;
+        for i in 0..=n {
+            check(LUT_MIN + (LUT_MAX - LUT_MIN) * i as f64 / n as f64);
+        }
+        check(LUT_MIN);
+        check(LUT_MAX);
+        worst
+    }
+
+    #[test]
+    fn table_matches_exact_solver() {
+        let (err, at) = worst_table_error();
+        eprintln!("output_stage table: worst error {err:e} at x = {at}");
+        assert!(err <= TABLE_ERROR_BOUND, "table error {err:e} at x = {at}");
+        // The music range alone, for the record.
+        let music = (0..=80_000)
+            .map(|i| -4.0 + 8.0 * f64::from(i) / 80_000.0)
+            .map(|x| (output_stage(x) - output_stage_exact(x)).abs())
+            .fold(0.0_f64, f64::max);
+        eprintln!("output_stage table: worst error in [-4, 4] {music:e}");
+        assert!(music <= TABLE_ERROR_BOUND);
+    }
+
+    #[test]
+    fn table_ends_and_outside_use_exact_values() {
+        assert_eq!(output_stage(LUT_MIN), output_stage_exact(LUT_MIN));
+        assert!((output_stage(LUT_MAX) - output_stage_exact(LUT_MAX)).abs() < 1e-12);
+        for &x in &[-8.5, 8.5, -20.0, 20.0] {
+            assert_eq!(output_stage(x), output_stage_exact(x));
+        }
+        assert_eq!(output_stage(f64::NAN), 0.0);
+        assert_eq!(output_stage_exact(f64::NAN), 0.0);
+    }
 
     #[test]
     fn monotonic_and_finite_over_wide_range() {

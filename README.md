@@ -20,3 +20,9 @@ constants come from the datasheet and public documents, or are plain choices.
 [`docs/provenance.md`](https://github.com/aovestdipaperino/mos6581/blob/main/docs/provenance.md)
 lists every source, how close each model came to the real chip, and the known
 fidelity gaps.
+
+The 0.3.0 DC model and output stage came out of a fidelity round against a
+reference player (VICE `vsid`, ReSID 6581) and, for the filter, a private bank
+of per-chip measurements of real 6581s; the filter was left unchanged. Method,
+thresholds, round counts and remaining gaps are in the "Fidelity round" section
+of [`docs/provenance.md`](https://github.com/aovestdipaperino/mos6581/blob/main/docs/provenance.md).

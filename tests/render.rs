@@ -332,3 +332,52 @@ fn ring_modulation_of_voice_1_uses_voice_3_as_the_source() {
         "ring modulation changed nothing: both cross {plain_x} times"
     );
 }
+
+/// With every oscillator stopped and no envelope open, only the mixer DC
+/// reaches the volume DAC, so each `$D418` write steps the output. Stepping
+/// through several volumes on one chip, the step must grow with the volume:
+/// the DC is positive, and the output stage after the volume DAC is monotonic.
+#[test]
+fn volume_writes_step_the_output_monotonically() {
+    let mut sid = Sid::new(Model::Pal, RATE);
+    for voice in 0..3 {
+        sid.write(voice * 7, 0); // frequency 0: oscillator stopped
+        sid.write(voice * 7 + 1, 0);
+        sid.write(voice * 7 + 4, 0); // no waveform, gate off
+    }
+    sid.write(24, 0x00);
+    let mut settle = vec![0.0f32; 8_820];
+    sid.render(&mut settle);
+
+    let mut steps = Vec::new();
+    for volume in [1u8, 3, 5, 8, 11, 15] {
+        let mut before = [0.0f32; 1];
+        sid.render(&mut before);
+        sid.write(24, volume);
+        let mut after = [0.0f32; 64];
+        sid.render(&mut after);
+        let peak = after.iter().fold(f32::MIN, |m, &s| m.max(s)) - before[0];
+        steps.push((volume, peak));
+        // Back to zero volume and let the AC coupling settle.
+        sid.write(24, 0x00);
+        sid.render(&mut settle);
+    }
+
+    assert!(
+        steps[0].1 > 0.0,
+        "a volume step must raise the output: {steps:?}"
+    );
+    for pair in steps.windows(2) {
+        assert!(
+            pair[1].1 > pair[0].1,
+            "output level not monotonic in volume: {steps:?}"
+        );
+    }
+    // A step to full volume is roughly three times a step to a third of it:
+    // the output stage is only mildly nonlinear.
+    let ratio = steps[5].1 / steps[2].1;
+    assert!(
+        ratio > 2.0 && ratio < 4.0,
+        "15/5 step ratio {ratio}: {steps:?}"
+    );
+}

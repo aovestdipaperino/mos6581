@@ -158,7 +158,7 @@ This round measured the default build against a reference player and then replac
 
 A private oracle renders each tune twice, once with this crate and once with VICE 3.10 `vsid` (engine: ReSID 6581), a public tool used as a reference player. It aligns the two renders by correlating octave-band spectrograms (offset 0 to 2.5 s), then reports the RMS dB distance over the octave bands from 31 Hz to 16 kHz. Each render is gain-normalised, with the absolute level reported separately, and each band is floored at -55 dBFS. The reference renders and the tool are private and never committed.
 
-The rule for using the reference has two halves. Clean-room authors get PASS or FAIL only, with the thresholds fixed before authoring and at most three rounds per item, exactly as in the previous round. The controller, who never writes the models, may compare renders directly to look for structural bugs in the harness. A fix found that way must be justified from public documents, and no observed number may be copied into the code. For the filter, rounds 4 to 6 used a second reference described below: a private bank of per-chip measurements of 45 real 6581s (not in this repository).
+The rule for using the reference has two halves. Clean-room authors get PASS or FAIL only, with the thresholds fixed before authoring and at most three rounds per item, exactly as in the previous round. The controller, who never writes the models, may compare renders directly to look for structural bugs in the harness. A fix found that way must be justified from public documents, and no observed number may be copied into the code. For the filter, a second reference described below was added from round 4 on: a private bank of per-chip measurements of 45 real 6581s (not in this repository). Round 4 was only scored against it after the fact; its thresholds were fixed before round 5.
 
 ### DC model
 
@@ -172,7 +172,7 @@ The entry (commit 2d30a92) models an NMOS source follower on 12 V driving the bo
 
 The cutoff curve and the resonance model were not changed. Rounds 1 to 3 used thresholds taken from VICE probes (the frequency and height of the resonant peak on a noise band-pass probe, plus target tunes). Every candidate failed, and every candidate got worse than the model already in place. One reason is that reSID caps its Q at about 1.7, which makes it a biased reference for resonance.
 
-Rounds 4 to 6 added a readable copy of the datasheet and switched to a data-level reference built from the 45 measured chips. The thresholds were: the cutoff at fc=0 inside the chips' p10 to p90 range (244 to 404 Hz); at least 14 of 16 points (fc = i*128+64) inside the chips' p10 to p90 band, under an assumed row mapping; and a normalised resonance-curve shape within 0.15 (the absolute Q unit is unknown). The filter in place scores a floor PASS, 13 of 16 points and a shape PASS. No round beat it, so it stays. The remaining gap is the top of the cutoff range, 12 kHz here against 16 to 21 kHz on real chips; the chip-to-chip spread in the mid range is about 4 octaves, so the middle is not a useful target.
+The same author then ran a second series of three rounds, after a new source was supplied: a readable copy of the datasheet. That makes six rounds for one item, above the three-round cap stated in the method; the second series was a decision taken because of the new source, not a rerun of the first. Round 4 was authored under the reference-player thresholds of rounds 1 to 3 and only scored afterwards against a data-level reference built from the 45 measured chips. The measured-chip thresholds were fixed before round 5, so only rounds 5 and 6 were authored against them. The thresholds were: the cutoff at fc=0 inside the chips' p10 to p90 range (244 to 404 Hz); at least 14 of 16 points (fc = i*128+64) inside the chips' p10 to p90 band, under an assumed row mapping; and a normalised resonance-curve shape within 0.15 (the absolute Q unit is unknown). The filter in place scores a floor PASS, 13 of 16 points and a shape PASS. No round beat it, so it stays. The remaining gap is the top of the cutoff range, 12 kHz here against 16 to 21 kHz on real chips; the chip-to-chip spread in the mid range is about 4 octaves, so the middle is not a useful target.
 
 ### Honesty notes
 
@@ -184,22 +184,23 @@ The output stage has two feedback-driven values: K went from 10 to 2 mA/V^2 and 
 |---|---|---|---|
 | DC model | 1 | Passed every threshold | `5_Title_Tunes` 31 to 62 Hz band -12.8 to -1.0 dB; distance 6.5 to 2.6; no regression |
 | Output stage | 2 shipped of 3 | Round 2 under the fallback rule; target band never met | `Alternative_World_Games` band -9.2 to -6.9 dB; distance 5.8 to 5.1; no regression |
-| Filter | 6 | Not changed | floor PASS, 13 of 16 points, shape PASS for the model in place; no round beat it |
+| Filter | 6 (two series of 3, same author) | Not changed | floor PASS, 13 of 16 points, shape PASS for the model in place; no round beat it |
 
-## Known default-build fidelity gaps
+## Known fidelity gaps
 
-The default build (without `gpl-data`) is clean-room and measurably less faithful
-than the measured data (via the private evaluator, before 0.2.0). The known differences:
+Since 0.2.0 there is a single build: the `gpl-data` feature and its measured
+data are gone, and every model is clean-room. The known differences from the
+real chip, as of 0.3.0:
 
 - Cutoff curve: the clean-room curve's closed corner is close to the measured
-  one, but its mid-range shape is not: the median error is 0.689 octave, set by the
-  knee position, which rests on unsourced DAC-voltage choices. Fixtures through a
-  mostly closed low-pass now play at about the measured build's level (the `scale`
-  fixture renders at rms 1703 against 1392; before this round it was 308).
-- Combined waveforms: the clean-room tables are much closer to measured than the
-  AND tables were (RMS of 255: `st` 49.9, `p_t` 86.5, `ps_` 28.2, `pst` 6.3). `p_t`
-  is all zeros under the model, which is quieter than the real chip.
-- Voice model: the voice DAC zero is now a clean-room 1024 (see the DC entry
+  one, but its mid-range shape is not: the median error is 0.689 octave, set by
+  the knee position, which rests on unsourced DAC-voltage choices. The top of the
+  range is 12 kHz against 16 to 21 kHz on real chips (see the filter entry of
+  the fidelity round above).
+- Combined waveforms: `p_t` is all zeros under the model, which is quieter than
+  the real chip; the other combinations are close but not equal (RMS of 255:
+  `st` 49.9, `ps_` 28.2, `pst` 6.3).
+- Voice model: the voice DAC zero is a clean-room 1024 (see the DC entry
   above), which gives the voice its offset from centre. Whether that matches the
   measured asymmetry beyond the bands the oracle checks is not established.
 - Envelope timing: the rate periods are derived from the datasheet's nominal
@@ -224,6 +225,13 @@ than the measured data (via the private evaluator, before 0.2.0). The known diff
 - Power-on RAM in `sid-play`: the documented image matches 973 of 1024 captured
   bytes. The rest are undocumented, or values the sources leave ambiguous; see the
   file's labels.
+
+History (before 0.2.0, when a `gpl-data` build with measured data still
+existed): the private evaluator compared the default build against that
+measured build. Its figures are the ones in the audit table above; for example
+the `scale` fixture, through a mostly closed low-pass, rendered at rms 1703
+against 1392 for the measured build, up from 308 before the cutoff round. Those
+figures describe 0.1.x and are not re-measured for the current build.
 
 ## 0.2.0: gpl-data removed (2026-11-12)
 
