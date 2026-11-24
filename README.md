@@ -4,6 +4,8 @@
 
 # mos6581
 
+[![GitHub stars](https://img.shields.io/github/stars/aovestdipaperino/mos6581?logo=github&color=brightgreen)](https://github.com/aovestdipaperino/mos6581/stargazers)
+
 A cycle-stepped MOS 6581 SID chip emulator in Rust. The chip is stepped one Φ2
 cycle at a time and has no runtime dependencies. It is only
 the chip: no CPU, no memory map, no player. See [`sid-play`](https://github.com/aovestdipaperino/sid-play) for a PSID player built
